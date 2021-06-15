@@ -4,44 +4,78 @@ from bs4 import BeautifulSoup
 
 # System libraries.
 import sys
-import threading
+import json
+
+# Lithops.
+from lithops.multiprocessing import Pool
+from lithops import Storage
+
+# Http header.
+header = { 'user-agent':'Mozilla/5.0 (X11; Linux x86_64; rv:78.0) Gecko/20100101 Firefox/78.0' }
 
 # Thread code.
-import tarragonadiari_thread
+def process_news(link):
 
-mutex = threading.Lock()
+    news_format = {}
 
-# Auxiliar variables.
-threads = []
-header = { 'user-agent':'Mozilla/5.0 (X11; Linux x86_64; rv:78.0) Gecko/20100101 Firefox/78.0' }
-news_format = {}
+    r = requests.get(link, headers=header)
 
-# We create HTML parser.
-r = requests.get('https://www.diaridetarragona.com/ajax/get_search_news.html?viewmore=%2Fajax%2Fget_search_news.html&page=1&size='+sys.argv[2]+'&search='+sys.argv[1], headers=header)
-soup = BeautifulSoup(r.text, 'html.parser')
+    soup = BeautifulSoup(r.text, 'html.parser')
+    head = soup.find("header", class_='news-header')
 
-count = 0
-for news in soup.find_all("div", class_='news-data'):
+    # Get news header.
+    news_format['title'] = head.find("h1", class_='news-title').text
 
-    count +=1
+    # Get news starter.
+    starter = head.find("div",class_='news-excerpt')
+    if starter is not None:
+        starter = starter.text
+    else: starter = ''
+    news_format['starter'] = starter
 
-    # We get the link to the news page.
-    link_to_news = "https://www.diaridetarragona.com"+news.find("a").get('href')
+    # Get news date.
+    news_format['date'] = head.find("time", class_='news-date').text.replace("\n","").replace("\t","").split(" ")[0]
 
-    print(link_to_news)
+    # Get news paragraphs.
+    text = soup.find("div", class_='news-body').text
+    if text is None:
+        text = ''
+    news_format['text'] = text
 
-    # Start thread
-    new_th = threading.Thread(target=tarragonadiari_thread.process_news, args=(link_to_news,mutex,))
-    threads.append(new_th)
-    new_th.start()
+    storage = Storage()
+    storage.put_object(bucket='news-bucket', key='diarideTGN/'+news_format['title'].replace(" ","")+'.json', body = json.dumps(news_format))
 
-c = 1
-for t in threads:
-    print("Esperant al thread ",c)
-    t.join()
-    c += 1
+# -------------------------------------------------------------------------------------------------------------------------------------
 
-if count == 0:
-    print("No hi ha resultats de la cerca.")
-else:
-    print("Numero de resultados indexados:"+str(count))
+def get_links():
+
+    # Auxiliar variables.
+    link_to_news = []
+
+    # We create HTML parser.
+    r = requests.get('https://www.diaridetarragona.com/ajax/get_search_news.html?viewmore=%2Fajax%2Fget_search_news.html&page=1&size='+sys.argv[2]+'&search='+sys.argv[1], headers=header)
+    soup = BeautifulSoup(r.text, 'html.parser')
+
+    count = 0
+    for news in soup.find_all("div", class_='news-data'):
+
+        count +=1
+
+        # We get the link to the news page.
+        link_to_news.append("https://www.diaridetarragona.com"+news.find("a").get('href'))
+
+    return link_to_news,count
+
+if __name__ == '__main__':
+        
+    link_to_news,count = get_links()
+
+    # Start cloud thread
+    with Pool() as pool:
+        result = pool.map(process_news, link_to_news)
+        print(result)
+
+    if count == 0:
+        print("No hi ha resultats de la cerca.")
+    else:
+        print("Numero de resultados indexados:"+str(count))
