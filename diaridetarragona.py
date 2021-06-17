@@ -1,4 +1,6 @@
 # Web scraping libraries.
+from itertools import count
+from os import link
 import requests
 from bs4 import BeautifulSoup
 
@@ -9,6 +11,7 @@ import mtranslate
 # System libraries.
 import sys
 import json
+import urllib
 
 # Lithops.
 from lithops.multiprocessing import Pool
@@ -27,8 +30,12 @@ def process_news(link):
      
     analyzer = SentimentIntensityAnalyzer()
     news_format = {}
-    r = requests.get(link, headers=header)
-    soup = BeautifulSoup(r.text, 'html.parser')
+    try:
+        r = requests.get(link, headers=header)
+        soup = BeautifulSoup(r.text, 'html.parser')
+    except requests.exceptions.TooManyRedirects:
+        return 0
+
     head = soup.find("header", class_='news-header')
 
     # Put news link.
@@ -55,14 +62,18 @@ def process_news(link):
     news_format['body'] = body.replace("\n","").replace("\t","")
 
     #Get news sentiment analysis.
-    news_format['sentiment'] = analyzer.polarity_scores(mtranslate.translate(news_format['starter']+'\n'+news_format['body'],'en','auto'))['compound']
-
+    try:
+        news_format['sentiment'] = analyzer.polarity_scores(mtranslate.translate(news_format['starter']+'\n'+news_format['body'],'en','auto'))['compound']
+    except urllib.error.HTTPError:
+        return 0
+    
     # Get news total words number.
     word_counter = 0
     for field in news_format.values():
         word_counter += len(str(field).split(" "))
     news_format['words_number'] = word_counter
 
+    return 1
     # Store the news content to the cloud COS.
     storage = Storage()
     storage.put_object(bucket='news-bucket', key=SEARCH_KEY+'/diaridetarragona/'+news_format['title'].replace(" ","_")+'.json', body = json.dumps(news_format))
@@ -79,25 +90,29 @@ def get_links():
     soup = BeautifulSoup(r.text, 'html.parser')
 
     # Get the links to the news.
-    count = 0
     for news in soup.find_all("div", class_='news-data'):
-
-        count +=1
         # We get the link to the news page.
         link_to_news.append("https://www.diaridetarragona.com"+news.find("a").get('href'))
 
-    return link_to_news,count
+    return link_to_news
 
 if __name__ == '__main__':
         
-    link_to_news,count = get_links()
+    link_to_news = get_links()
 
-    # Start cloud multiprocessing.
-    with Pool() as pool:
-        result = pool.map(process_news, link_to_news)
-        print(result)
+    for link in link_to_news:
+        print(link)
+        process_news(link)
+    
+    
 
-    if count == 0:
-        print("No hi ha resultats de la cerca.")
-    else:
-        print("Numero de resultados indexados:"+str(count))
+    # # Start cloud multiprocessing.
+    # print('Starting...')
+    # with Pool() as pool:
+    #     result = pool.map(process_news, link_to_news)
+    # count = sum(result)
+
+    # if count == 0:
+    #     print("No hi ha resultats de la cerca.")
+    # else:
+    #     print("Numero de resultados indexados:"+str(count))

@@ -1,6 +1,7 @@
 # Web scraping libraries.
 import requests
 from bs4 import BeautifulSoup
+from requests.sessions import Request
 
 #Sentiment Analisys libraries.
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -17,13 +18,17 @@ from lithops import Storage
 # Http header.
 header = { 'user-agent':'Mozilla/5.0 (X11; Linux x86_64; rv:78.0) Gecko/20100101 Firefox/78.0' }
 
-SEARCH_KEY = sys.argv[1]
+SEARCH_KEY = ''
 
 def process_news(link):
 
     analyzer = SentimentIntensityAnalyzer() 
     news_format = {}
-    r = requests.get(link, headers=header)
+    try:
+        r = requests.get(link, headers=header)
+    except requests.exceptions.TooManyRedirects:
+        return 0
+
     soup = BeautifulSoup(r.text, 'html.parser')
     frame = soup.find("div", class_='span8')
     
@@ -63,6 +68,7 @@ def process_news(link):
     storage = Storage()
     storage.put_object(bucket='news-bucket', key=SEARCH_KEY+'/ccma/'+news_format['title'].replace(" ","_")+'.json', body = json.dumps(news_format))
 
+    return 1
 # -------------------------------------------------------------------------------------------------------------------------------------
 
 def get_links():
@@ -71,7 +77,7 @@ def get_links():
     link_to_news = []
 
     # We create HTML parser.
-    r = requests.get('https://www.ccma.cat/cercador/?text='+sys.argv[1]+'&profile=noticies&pagina=1', headers=header)
+    r = requests.get('https://www.ccma.cat/cercador/?text='+SEARCH_KEY+'&profile=noticies&pagina=1', headers=header)
     soup = BeautifulSoup(r.text, 'html.parser')
 
     # Get the number of pages in the website.
@@ -82,28 +88,45 @@ def get_links():
         pages = pages.text.split(" ")[3]
 
     # Get the links to the news.
-    count = 0
     for i in range(int(pages)+1):
-        r = requests.get('https://www.ccma.cat/cercador/?text='+sys.argv[1]+'&profile=noticies&pagina='+str(i), headers=header)
+        r = requests.get('https://www.ccma.cat/cercador/?text='+SEARCH_KEY+'&profile=noticies&pagina='+str(i), headers=header)
         soup = BeautifulSoup(r.text, 'html.parser')
 
         for news in soup.find_all("li", class_='F-llistat-item'):
-            count +=1
             # We get the link to the news page.
             link_to_news.append("https://www.ccma.cat"+news.find("a").get('href'))
     
-    return link_to_news,count
+    return link_to_news
 
 
-if __name__ == '__main__':
-    
-    link_to_news,count = get_links()
+def query(topic):
+    global SEARCH_KEY
+    SEARCH_KEY = topic
+    link_to_news = get_links()
 
     # Start cloud multiprocessing.
     with Pool() as pool:
-        pool.map(process_news, link_to_news)
+        result = pool.map(process_news, link_to_news)
+    
+    count = result.sum()
 
     if count == 0:
-        print("No hi ha resultats de la cerca.")
+        return "CCMA: no results found."
     else:
-        print("Numero de resultados indexados:"+str(count))
+        return str(count)+" results found."
+
+if __name__ == '__main__':
+
+    SEARCH_KEY = sys.argv[1]
+
+    link_to_news = get_links()
+
+    # Start cloud multiprocessing.
+    with Pool() as pool:
+        result = pool.map(process_news, link_to_news)
+
+    count = sum(result)
+    if count == 0:
+        print ("CCMA: no results found.")
+    else:
+        print (str(count)+" results found.")
