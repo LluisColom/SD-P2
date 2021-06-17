@@ -2,6 +2,10 @@
 import requests
 from bs4 import BeautifulSoup
 
+#Sentiment Analisys libraries.
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import mtranslate
+
 # System libraries.
 import sys
 import json
@@ -13,13 +17,17 @@ from lithops import Storage
 # Http header.
 header = { 'user-agent':'Mozilla/5.0 (X11; Linux x86_64; rv:78.0) Gecko/20100101 Firefox/78.0' }
 
+SEARCH_KEY = sys.argv[1]
+
+# The higher, more results. The lower, less results.
+DEFAULT_SEARCH_RESULTS = 200
+
 # Thread code.
 def process_news(link):
-
+     
+    analyzer = SentimentIntensityAnalyzer()
     news_format = {}
-
     r = requests.get(link, headers=header)
-
     soup = BeautifulSoup(r.text, 'html.parser')
     head = soup.find("header", class_='news-header')
 
@@ -42,8 +50,18 @@ def process_news(link):
         text = ''
     news_format['text'] = text
 
+    #Get news sentiment analysis.
+    news_format['sentiment'] = analyzer.polarity_scores(mtranslate.translate(news_format['starter']+'\n'+news_format['body'],'en','auto'))['compound']
+
+    # Get news total words number.
+    word_counter = 0
+    for field in news_format.values():
+        word_counter += len(str(field).split(" "))
+    news_format['words_number'] = word_counter
+
+    # Store the news content to the cloud COS.
     storage = Storage()
-    storage.put_object(bucket='news-bucket', key='diarideTGN/'+news_format['title'].replace(" ","")+'.json', body = json.dumps(news_format))
+    storage.put_object(bucket='news-bucket', key=SEARCH_KEY+'/diaridetarragona/'+news_format['title'].replace(" ","_")+'.json', body = json.dumps(news_format))
 
 # -------------------------------------------------------------------------------------------------------------------------------------
 
@@ -53,7 +71,7 @@ def get_links():
     link_to_news = []
 
     # We create HTML parser.
-    r = requests.get('https://www.diaridetarragona.com/ajax/get_search_news.html?viewmore=%2Fajax%2Fget_search_news.html&page=1&size='+sys.argv[2]+'&search='+sys.argv[1], headers=header)
+    r = requests.get('https://www.diaridetarragona.com/ajax/get_search_news.html?viewmore=%2Fajax%2Fget_search_news.html&page=1&size='+str(DEFAULT_SEARCH_RESULTS)+'&search='+sys.argv[1], headers=header)
     soup = BeautifulSoup(r.text, 'html.parser')
 
     count = 0
