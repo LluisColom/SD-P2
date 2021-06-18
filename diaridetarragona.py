@@ -73,11 +73,11 @@ def process_news(link):
         word_counter += len(str(field).split(" "))
     news_format['words_number'] = word_counter
 
-    return 1
     # Store the news content to the cloud COS.
     storage = Storage()
     storage.put_object(bucket='news-bucket', key=SEARCH_KEY+'/diaridetarragona/'+news_format['title'].replace(" ","_")+'.json', body = json.dumps(news_format))
-
+    
+    return 1
 # -------------------------------------------------------------------------------------------------------------------------------------
 
 def get_links():
@@ -86,7 +86,7 @@ def get_links():
     link_to_news = []
 
     # We create HTML parser.
-    r = requests.get('https://www.diaridetarragona.com/ajax/get_search_news.html?viewmore=%2Fajax%2Fget_search_news.html&page=1&size='+str(DEFAULT_SEARCH_RESULTS)+'&search='+sys.argv[1], headers=header)
+    r = requests.get('https://www.diaridetarragona.com/ajax/get_search_news.html?viewmore=%2Fajax%2Fget_search_news.html&page=1&size='+str(DEFAULT_SEARCH_RESULTS)+'&search='+SEARCH_KEY, headers=header)
     soup = BeautifulSoup(r.text, 'html.parser')
 
     # Get the links to the news.
@@ -99,20 +99,14 @@ def get_links():
 if __name__ == '__main__':
         
     link_to_news = get_links()
-
-    for link in link_to_news:
-        print(link)
-        process_news(link)
     
-    
+    # Start cloud multiprocessing.
+    print('Starting...')
+    with Pool() as pool:
+        result = pool.map(process_news, link_to_news)
+    count = sum(result)
 
-    # # Start cloud multiprocessing.
-    # print('Starting...')
-    # with Pool() as pool:
-    #     result = pool.map(process_news, link_to_news)
-    # count = sum(result)
-
-    # if count == 0:
-    #     print("No hi ha resultats de la cerca.")
-    # else:
-    #     print("Numero de resultados indexados:"+str(count))
+    if count == 0:
+        print("No hi ha resultats de la cerca.")
+    else:
+        print("Numero de resultados indexados:"+str(count))

@@ -24,7 +24,12 @@ def process_news(link):
 
     analyzer = SentimentIntensityAnalyzer()
     news_format = {}
-    r = requests.get(link, headers=header)
+
+    try:
+        r = requests.get(link, headers=header)
+        soup = BeautifulSoup(r.text, 'html.parser')
+    except requests.exceptions.TooManyRedirects:
+        return 0
     soup = BeautifulSoup(r.text, 'html.parser')
     
     # Put news link.
@@ -33,13 +38,13 @@ def process_news(link):
     # Get news header.
     title = soup.find("div", class_='title-opening-section')
     if title is None:
-        return          #  Case we are threatting an opinion...
+        return 0         #  Case we are threatting an opinion...
     news_format['title'] = title.text.replace("\n","").replace("\t","").replace("\"","")
 
     # Get news starter.
     description = soup.find("div", class_='description')
     if description is None:
-        return          # Case we are threatting an interview...
+        return 0         # Case we are threatting an interview...
     news_format['starter'] = description.text.replace("\n","").replace("\t","").replace("\xa0"," ").replace("\"","")
 
     # Get news date.
@@ -66,6 +71,7 @@ def process_news(link):
     storage = Storage()
     storage.put_object(bucket='news-bucket', key=SEARCH_KEY+'/diaridebarcelona/'+news_format['title'].replace(" ","_")+'.json', body = json.dumps(news_format))
 
+    return 1
 
 def get_links():
 
@@ -73,7 +79,7 @@ def get_links():
     link_to_news = []
 
     # We create HTML parser.
-    r = requests.get('https://www.diaridebarcelona.cat/search?q='+sys.argv[1], headers=header)
+    r = requests.get('https://www.diaridebarcelona.cat/search?q='+SEARCH_KEY, headers=header)
     soup = BeautifulSoup(r.text, 'html.parser')
 
     # Get the number of pages in the website.
@@ -85,27 +91,25 @@ def get_links():
         pages = 0  
 
     # Get the links to the news.
-    count = 0
     for i in range(int(pages)+1):
         r = requests.get('https://www.diaridebarcelona.cat/search?q='+SEARCH_KEY+'&start='+str(i), headers=header)
         soup = BeautifulSoup(r.text, 'html.parser')
 
         for news in soup.find_all(class_='col-sm-6 col-lg-3 mb-20px mb-lg-30px'):
-            count +=1
             # We get the link to the news page.
             news = news.find(class_='h1 modul-petit')
             link_to_news.append(news.find("a").get('href'))
     
-    return link_to_news,count
+    return link_to_news
 
 if __name__ == '__main__':
 
-    link_to_news,count = get_links()
+    link_to_news = get_links()
 
     # Start cloud multiprocessing.
     with Pool() as pool:
         result = pool.map(process_news, link_to_news)
-        print(result)
+    count = sum(result)
 
     if count == 0:
         print("No hi ha resultats de la cerca.")
